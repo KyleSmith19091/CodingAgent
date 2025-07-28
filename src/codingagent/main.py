@@ -22,6 +22,7 @@ from codingagent.packages.prompts import system_prompt
 
 class App:
     def __init__(self, mcp_client_index, config: Config):
+        self.is_sub_agent = False
         self.model_client = Client(host=config.inference_api_url)
         self.mcp_client_index: Dict[str, mcp_client.MCPClient] = mcp_client_index
         self.mcp_tool_client_index: Dict[str, str] = {}
@@ -35,8 +36,9 @@ class App:
         }]
 
     async def init(self):
-        self.console.print(Panel("[magenta bold]⛛[/magenta bold]\tHi 👋, I'm [magenta u]M3L[/magenta u]\n\n\t[#9ca0b0]Your friendly AI coding agent, ready to help all your software engineering needs[/#9ca0b0]", border_style="bold magenta"))
-        self.console.print("")
+        if not self.is_sub_agent:
+            self.console.print(Panel("[magenta bold]⛛[/magenta bold]\tHi 👋, I'm [magenta u]M3L[/magenta u]\n\n\t[#9ca0b0]Your friendly AI coding agent, ready to help all your software engineering needs[/#9ca0b0]", border_style="bold magenta"))
+            self.console.print("")
 
         await self._setup_tools()
 
@@ -74,14 +76,19 @@ class App:
 
         pass
 
-    async def run(self):
+    async def run(self, query: str = ""):
         while True:
             # wait for the user query
-            query = Prompt.ask(Text("(Enter your query here)", style="#9ca0b0 bold frame"))    
+            if not self.is_sub_agent:
+                query = Prompt.ask(Text("✿ (Query)", style="#8839ef bold"))    
 
             # parse query
             if query == "/exit":
                 break
+
+            # add nothink by default 
+            if "\\think" not in query:
+               query += " \\nothink" 
 
             # append user message
             self.messages.append({
@@ -101,33 +108,35 @@ class App:
             try:
                 # stream response
                 self.console.print(Markdown("> *Assistant*: "), end="", style="bold cyan")
-                with Live(self.render_markdown(""), refresh_per_second=4) as live:
-                    thinking = False
-                    response = []
-                    tool_calls = []
-                    for part in self.model_client.chat(self.config.model_id, messages=self.messages, stream=True, think=False, tools=self.tools, options={'num_ctx': self.config.context_size}):
-                        if part.message.tool_calls is not None and len(part.message.tool_calls) > 0:
-                            tool_calls.extend({
-                                "name": call.function.name, 
-                                "args": call.function.arguments
-                            } for call in part.message.tool_calls)
-                        else:
-                            if part.message.content:
-                                # check if we are thinking
-                                if part.message.content == "<think>":
-                                    thinking = True
-                                    continue
-                                elif part.message.content == "</think>":
-                                    thinking = False
-                                    continue
+                thinking = False
+                response = []
+                thoughts = []
+                tool_calls = []
+                for part in self.model_client.chat(self.config.model_id, messages=self.messages, stream=True, think=False, tools=self.tools, options={'num_ctx': self.config.context_size}):
+                    if part.message.tool_calls is not None and len(part.message.tool_calls) > 0:
+                        tool_calls.extend({
+                            "name": call.function.name, 
+                            "args": call.function.arguments
+                        } for call in part.message.tool_calls)
+                    else:
+                        if part.message.content:
+                            # check if we are thinking
+                            if part.message.content == "<think>":
+                                thinking = True
+                                continue
+                            elif part.message.content == "</think>":
+                                thinking = False
+                                continue
 
-                                # display thoughts in slate
-                                if thinking:
-                                    live.update(self.render_markdown(part.message.content))
-                                else:
-                                    # collect part of response so we can add it to context later (don't collect thinking)
-                                    response.append(part.message.content)
+                            # display thoughts in slate
+                            if thinking:
+                                thoughts.append(part.message.content)
+                                self.console.print(Text("".join(part.message.content), style="#9ca0b0"), end="")
+                            else:
+                                # collect part of response so we can add it to context later (don't collect thinking)
+                                response.append(part.message.content)
 
+                self.console.print()
                 self.console.print(Markdown("".join(response)))
                 self.console.print()
 
