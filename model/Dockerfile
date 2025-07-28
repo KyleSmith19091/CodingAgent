@@ -13,7 +13,7 @@ ENV OLLAMA_DEBUG false
 ENV OLLAMA_KEEP_ALIVE -1
 
 # Store the model weights in the container image
-ENV MODEL hf.co/unsloth/Qwen3-14B-GGUF:UD-Q4_K_XL
+ENV MODEL hf.co/unsloth/Qwen3-8B-GGUF:Q4_K_M
 RUN ollama serve & sleep 5 && ollama pull $MODEL
 
 # Start Ollama
