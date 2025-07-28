@@ -5,7 +5,7 @@ import json
 from mcp.server.fastmcp import FastMCP
 
 # initialise FastMCP server
-mcp = FastMCP("read")
+mcp = FastMCP("read", log_level="CRITICAL")
 
 @mcp.tool()
 def read_file(file_path: str, offset = 0, limit = 20000) -> str:
