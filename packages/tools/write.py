@@ -19,7 +19,7 @@ def write_tool(file_path: str, content: str = "") -> str:
     with open(file_path, "w") as f:
         f.write(content)
 
-    return "Done writing file"
+    return f"File {file_path} has been created."
         
 if __name__ == "__main__":
     mcp.run()
