@@ -1,5 +1,5 @@
 [project]
-name = "mesh-code"
+name = "codingagent"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -7,16 +7,25 @@ requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.116.1",
     "llama-cpp-python>=0.3.14",
-    "mcp>=1.12.1",
+    "mcp[cli]>=1.12.1",
     "ollama>=0.5.1",
     "requests>=2.32.4",
     "rich>=14.0.0",
     "textual>=4.0.0",
 ]
 
+[project.scripts]
+coding-agent = "codingagent.main:run"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["./packages/*"]
+py-modules = ["codingagent"]
+packages = ["src/packages", "src/codingagent"]
+
+[tool.uv]
+dev-dependencies = [
+    "nuitka>=2.7.12",
+]

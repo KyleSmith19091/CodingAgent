@@ -2,6 +2,10 @@ import asyncio
 from contextlib import AsyncExitStack
 import os
 from typing import Dict
+import argparse
+from pathlib import Path
+import json
+from dataclasses import asdict
 
 from ollama import Client
 from mcp.types import TextContent
@@ -12,25 +16,26 @@ from rich.text import Text
 from rich.markdown import Markdown
 from rich.live import Live
 
-from packages.config import CONTEXT_SIZE, INFERENCE_API_URL, MODEL_ID, TOOL_SERVERS
-from packages.tool_client import mcp_client
-from packages.prompts import system_prompt
+from codingagent.packages.config import DEFAULT_CONFIG, Config
+from codingagent.packages.tool_client import mcp_client
+from codingagent.packages.prompts import system_prompt
 
 class App:
-    def __init__(self, mcp_client_index):
-        self.model_client = Client(host=INFERENCE_API_URL)
+    def __init__(self, mcp_client_index, config: Config):
+        self.model_client = Client(host=config.inference_api_url)
         self.mcp_client_index: Dict[str, mcp_client.MCPClient] = mcp_client_index
         self.mcp_tool_client_index: Dict[str, str] = {}
         self.tools = []
         self.console = Console()
         self.error_console = Console(stderr=True)
+        self.config = config
         self.messages= [{
             "role": "system",
             "content": system_prompt.SYSTEM_PROMPT.format(directory=os.getcwd()), 
         }]
 
     async def init(self):
-        self.console.print(Panel("[magenta bold]⛛[/magenta bold]\tHi 👋, I'm [magenta u]M3L[/magenta u]\n\n\t[#9ca0b0]Your friendly AI coding agent, ready to help all your software engineering needs[/#9ca0b0]"))
+        self.console.print(Panel("[magenta bold]⛛[/magenta bold]\tHi 👋, I'm [magenta u]M3L[/magenta u]\n\n\t[#9ca0b0]Your friendly AI coding agent, ready to help all your software engineering needs[/#9ca0b0]", border_style="bold magenta"))
         self.console.print("")
 
         await self._setup_tools()
@@ -74,21 +79,24 @@ class App:
             # wait for the user query
             query = Prompt.ask(Text("(Enter your query here)", style="#9ca0b0 bold frame"))    
 
+            # parse query
             if query == "/exit":
                 break
 
+            # append user message
             self.messages.append({
                 "role": "user",
                 "content": query,
             })
 
-            await self.inference(query)
+            # run inference on history
+            await self.inference()
         pass 
     
     def render_markdown(self, content: str):
         self.console.print(Text(content), end="", style="#9ca0b0")
         
-    async def inference(self, query: str):
+    async def inference(self):
         while True:
             try:
                 # stream response
@@ -97,7 +105,7 @@ class App:
                     thinking = False
                     response = []
                     tool_calls = []
-                    for part in self.model_client.chat(MODEL_ID, messages=self.messages, stream=True, think=False, tools=self.tools, options={'num_ctx': CONTEXT_SIZE}):
+                    for part in self.model_client.chat(self.config.model_id, messages=self.messages, stream=True, think=False, tools=self.tools, options={'num_ctx': self.config.context_size}):
                         if part.message.tool_calls is not None and len(part.message.tool_calls) > 0:
                             tool_calls.extend({
                                 "name": call.function.name, 
@@ -115,7 +123,6 @@ class App:
 
                                 # display thoughts in slate
                                 if thinking:
-                                    # self.console.print(Text(part.message.content), end="", style="#9ca0b0")
                                     live.update(self.render_markdown(part.message.content))
                                 else:
                                     # collect part of response so we can add it to context later (don't collect thinking)
@@ -184,14 +191,59 @@ class App:
         pass
         
 async def main():
+    homePath = Path.home()    
+
+    parser = argparse.ArgumentParser()    
+    parser.add_argument("-c", "--config", help="Absolute path to config file", default=f"{homePath}/.codingagent_config")
+    parser.add_argument("-add", "--add-mcp", help="Add mcp command")
+    parser.add_argument("-inf-url", "--inference-url", help="API URL where model is hosted")
+
+    args = parser.parse_args()
+
+    config_path = args.config
+    config = DEFAULT_CONFIG 
+
+    # read config
+    try:
+        # check if config already exists
+        os.stat(config_path)
+
+        # construct config from content
+        with open(config_path, "r") as f:
+            body = json.loads(f.read())
+            config = Config(**body)
+    except FileNotFoundError:
+        # create config file
+        with open(config_path, "w") as f:
+            f.write(json.dumps(asdict(config)))
+    except Exception as e:
+        print(f"could not check if config file exists: {e}") 
+        exit(1)
+
+    # add mcp server
+    if args.add_mcp != None:
+        config.tool_server.append(args.add_mcp)
+        with open(config_path, "w") as f:
+            f.write(json.dumps(config))
+        print(f"Added mcp: {args.add_mcp}")
+        exit(0)
+
+    # update inference url        
+    if args.inference_url != None:
+        config.inference_api_url = args.inference_url
+        with open(config_path, "w") as f:
+            f.write(json.dumps(config))
+        print(f"Updated inference url: {args.inference_url}")
+        exit(0)
+
     mcp_client_index = {}
     try:
         async with AsyncExitStack() as stack:
-            for tool_server in TOOL_SERVERS:
+            for tool_server in config.tool_server:
                 client = mcp_client.MCPClient()
                 
                 # connect to server
-                await client.connect_to_server(tool_server)
+                await client.connect_to_server(tool_server.split(" "))
 
                 # register client for later use
                 mcp_client_index[tool_server] = client
@@ -199,15 +251,24 @@ async def main():
                 # ensure cleanup is correct
                 stack.push_async_callback(client.__aexit__, None, None, None)
 
-            app = App(mcp_client_index) 
+            app = App(mcp_client_index, config) 
             await app.init()
             await app.run()
-    except (ValueError, KeyboardInterrupt, asyncio.CancelledError):
+    except ValueError as e:
+        print("Something went wrong: ", e)
+    except (KeyboardInterrupt, asyncio.CancelledError):
         print("Shutdown requested")
+        # Explicitly cancel all tasks
+        tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
     finally:
         print("Bye!")
-
     pass
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        print(f"Done {e}")

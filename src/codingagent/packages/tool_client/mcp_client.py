@@ -10,29 +10,21 @@ class MCPClient:
         self.exit_stack = AsyncExitStack()
         pass
 
-    async def connect_to_server(self, server_script_path: str):
+    async def connect_to_server(self, server_command: list[str]):
         """Connect to an MCP server
 
         Args:
-            server_script_path: Path to the server script (.py or .js)
+            server_command: full command to run mcp server
         """
-        # confirm that the server is a script that we can execute
-        is_python = server_script_path.endswith(".py")
-        is_js = server_script_path.endswith(".js")
-        if not (is_python or is_js):
-            raise ValueError("Server script must be a .py or .js file")
 
-        # set command to use either python or node as executor
-        command = "uv" if is_python else "node"
-        args = [server_script_path]
-
-        if command == "uv":
-            args.insert(0, "run")
+        # validate command (not sure if more need to be checked)
+        if server_command[0] not in ["uv", "python", "python3", "npx"]:
+            raise ValueError(f"command {server_command[0]} not supported")
 
         # construct parameters so we can construct a client to interact with the 'server'
         server_params = StdioServerParameters(
-            command=command,
-            args=["run", server_script_path],
+            command=server_command[0],
+            args=server_command[1:],
             env=None
         )
         
