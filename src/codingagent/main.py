@@ -1,33 +1,50 @@
 import asyncio
-from contextlib import AsyncExitStack
 import os
-from typing import Dict
 import argparse
-from pathlib import Path
 import json
-from dataclasses import asdict
+from contextlib import AsyncExitStack
+from typing import Dict 
+from pathlib import Path
 
 from ollama import Client
 from mcp.types import TextContent
+from fastmcp.exceptions import ToolError
 from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.console import Console
 from rich.text import Text
 from rich.markdown import Markdown
-from rich.live import Live
+from rich.progress import Progress
+from prompt_toolkit import PromptSession, prompt
+from prompt_toolkit.completion import NestedCompleter
+from prompt_toolkit.patch_stdout import patch_stdout
 
-from codingagent.packages.config import DEFAULT_CONFIG, Config
-from codingagent.packages.tool_client import mcp_client
+from codingagent.config import (
+    BUILTIN_TOOLS, 
+    Config, 
+    ConfigArgs, 
+    load_config,
+)
 from codingagent.packages.prompts import system_prompt
+from codingagent.packages.tool_client import (
+    mcp_client,
+    builtin_mcp_client,
+)
+
+completer = NestedCompleter.from_nested_dict({
+    "/exit": None,
+    "/plan": None,
+})
 
 class App:
-    def __init__(self, mcp_client_index, config: Config):
+    def __init__(self, mcp_client_index: Dict[str, mcp_client.MCPClient], tools: list, config: Config):
         self.is_sub_agent = False
         self.model_client = Client(host=config.inference_api_url)
         self.mcp_client_index: Dict[str, mcp_client.MCPClient] = mcp_client_index
         self.mcp_tool_client_index: Dict[str, str] = {}
-        self.tools = []
+        self.tools = tools
         self.console = Console()
+        self.session = PromptSession()
         self.error_console = Console(stderr=True)
         self.config = config
         self.messages= [{
@@ -37,57 +54,33 @@ class App:
 
     async def init(self):
         if not self.is_sub_agent:
-            self.console.print(Panel("[magenta bold]⛛[/magenta bold]\tHi 👋, I'm [magenta u]M3L[/magenta u]\n\n\t[#9ca0b0]Your friendly AI coding agent, ready to help all your software engineering needs[/#9ca0b0]", border_style="bold magenta"))
+            self.console.print(Panel(f"[magenta bold]⛛[/magenta bold]   Hi 👋, I'm [magenta u]M3L[/magenta u]\n\n[#9ca0b0]Your friendly AI coding agent, ready to help all your software engineering needs\n\ncwd: {os.getcwd()}[/#9ca0b0]", border_style="bold magenta", width=60))
             self.console.print("")
-
-        await self._setup_tools()
-
-    async def _setup_tools(self):
-        # connect to mcp servers
-        try:
-            for (tool_server_id, tool_client) in self.mcp_client_index.items():
-                # append all the tools from the server
-                for tool in await tool_client.available_tools():
-                    # collect tool parameters
-                    properties = {}
-                    for property_id, property in tool.inputSchema["properties"].items():
-                        properties[property_id] = {
-                            "type": "string",
-                        }
-
-                    # create index to be able to map a tool to an mcp server
-                    self.mcp_tool_client_index[tool.name] = tool_server_id
-                        
-                    # record tool in ollama function spec
-                    self.tools.append({
-                        "type": "function",
-                        "function": {
-                            "name": tool.name,   
-                            "description": tool.description,
-                            "parameters": {
-                                "type": "object",
-                                "properties": properties,
-                                "required": tool.inputSchema["required"]
-                            },
-                        },
-                    }) 
-        except Exception as e:
-            self.notify(f"Error mounting application: {e}", severity="error")
-
-        pass
+            self.console.print("[bold red u]Ensure gcloud proxy is running[/bold red u]")
+            self.console.print("")
+            self.console.print(Markdown("--- Tips ---"))
+            self.console.print("[#303446]1.[/#303446] [#9ca0b0]Add \\think to your prompt to enable extended thinking (great for complex tasks!)[/#9ca0b0]")
+            self.console.print("[#303446]2.[/#303446] [#9ca0b0]Type /exit to end session[/#9ca0b0]")
+            self.console.print("")
 
     async def run(self, query: str = ""):
         while True:
             # wait for the user query
             if not self.is_sub_agent:
-                query = Prompt.ask(Text("✿ (Query)", style="#8839ef bold"))    
+                with patch_stdout():
+                    query = await self.session.prompt_async("> ", completer=completer, vi_mode=True) 
 
             # parse query
             if query == "/exit":
                 break
 
+            if query == "/plan":
+                break
+
             # add nothink by default 
+            should_think = True
             if "\\think" not in query:
+               should_think = False
                query += " \\nothink" 
 
             # append user message
@@ -97,48 +90,100 @@ class App:
             })
 
             # run inference on history
-            await self.inference()
+            await self.inference(should_think)
         pass 
     
-    def render_markdown(self, content: str):
-        self.console.print(Text(content), end="", style="#9ca0b0")
-        
-    async def inference(self):
+    def stream_response(self):
+        thinking = False
+        response = []
+        thoughts = []
+        tool_calls = []
+        for part in self.model_client.chat(self.config.model_id, messages=self.messages, stream=True, think=False, tools=self.tools, options={'num_ctx': self.config.context_size}):
+            if part.message.tool_calls is not None and len(part.message.tool_calls) > 0:
+                tool_calls.extend({
+                    "name": call.function.name, 
+                    "args": call.function.arguments
+                } for call in part.message.tool_calls)
+            else:
+                if part.message.content:
+                    if part.message.content == "<think>":
+                        thinking = True
+                        continue
+                    elif part.message.content == "</think>":
+                        thinking = False
+                        continue
+
+                    # display thoughts in slate
+                    if thinking:
+                        thoughts.append(part.message.content)
+                        self.console.print(Text("".join(part.message.content), style="#9ca0b0"), end="")
+                    else:
+                        # collect part of response so we can add it to context later (don't collect thinking)
+                        response.append(part.message.content)
+
+        return response, tool_calls
+    
+    async def call_tools(self, tools):
+        with self.console.status("[bold green]Calling tools...") as status:
+            for tool_call in tools:
+                self.console.print(Markdown(f"- Calling tool `{tool_call['name']}` with args `{tool_call['args']}`"))
+                # determine client we can use to interact with the server
+                try:
+                    client = self.mcp_client_index[tool_call["name"]]
+                except KeyError:
+                    raise ValueError(f"can not find client for tool {tool_call["name"]}")
+
+                # call tool and collect result
+                try:
+
+                    # call tool
+                    tool_result_content = await client.call_tool(
+                        tool_call["name"], 
+                        tool_call["args"]
+                    )
+
+                    # collect result content
+                    tool_result = ""
+                    for block in tool_result_content.content:
+                        if isinstance(block, TextContent):
+                            tool_result = tool_result + block.text
+                            
+                    # add tool result to history
+                    self.messages.append({
+                        "role": "tool",
+                        "content": tool_result,
+                        "tool_name": tool_call["name"]
+                    })
+
+                except ToolError as t:
+                    self.error_console.print(Markdown(f"- error during tool execution of {tool_call['name']} error: {t}", style="bold red"))
+                    self.messages.append({
+                        "role": "tool",
+                        "content": f"Error: {e}",
+                        "tool_name": tool_call["name"]
+                    }) 
+                except Exception as e:
+                    self.error_console.print(Markdown(f"- error during tool execution of {tool_call['name']} error: {e} with type {type(e)}", style="bold red"))
+                    self.messages.append({
+                        "role": "tool",
+                        "content": f"Error: {e}",
+                        "tool_name": tool_call["name"]
+                    })
+        pass
+    
+    async def inference(self, should_think: bool):
         while True:
             try:
                 # stream response
-                self.console.print(Markdown("> *Assistant*: "), end="", style="bold cyan")
-                thinking = False
-                response = []
-                thoughts = []
-                tool_calls = []
-                for part in self.model_client.chat(self.config.model_id, messages=self.messages, stream=True, think=False, tools=self.tools, options={'num_ctx': self.config.context_size}):
-                    if part.message.tool_calls is not None and len(part.message.tool_calls) > 0:
-                        tool_calls.extend({
-                            "name": call.function.name, 
-                            "args": call.function.arguments
-                        } for call in part.message.tool_calls)
-                    else:
-                        if part.message.content:
-                            # check if we are thinking
-                            if part.message.content == "<think>":
-                                thinking = True
-                                continue
-                            elif part.message.content == "</think>":
-                                thinking = False
-                                continue
-
-                            # display thoughts in slate
-                            if thinking:
-                                thoughts.append(part.message.content)
-                                self.console.print(Text("".join(part.message.content), style="#9ca0b0"), end="")
-                            else:
-                                # collect part of response so we can add it to context later (don't collect thinking)
-                                response.append(part.message.content)
-
-                self.console.print()
-                self.console.print(Markdown("".join(response)))
-                self.console.print()
+                if should_think:
+                    response, tool_calls = self.stream_response() 
+                else:
+                    counter = 0
+                    with self.console.status(f"Thinking...{counter}"):
+                        response, tool_calls = self.stream_response() 
+                    
+                if len(response) != 0:
+                    self.console.print(Markdown("".join(response)))
 
                 # add assistant response to history
                 assistant_content = "".join(response)
@@ -151,133 +196,88 @@ class App:
                 if len(tool_calls) == 0:
                     return
 
-                with self.console.status("[bold green]Caliing tools...") as status:
-                    for tool_call in tool_calls:
-                        self.console.log(f"calling tool {tool_call['name']} with args {tool_call['args']}")
-                        try:
-                            # determine server which hosts the tool
-                            server = self.mcp_tool_client_index[tool_call["name"]]
-                            if server == "":
-                                self.notify(f"tool {tool_call['name']} not found", severity="error")
-                                raise ValueError("could not find tool")
-
-                            # determine client we can use to interact with the server
-                            client = self.mcp_client_index[server]
-                            if client == None:
-                                self.notify(f"client not found for server {server}", severity="error")
-                                raise ValueError("could not find client for server")
-
-                            # call tool
-                            tool_result_content = await client.call_tool(
-                                tool_call["name"], 
-                                tool_call["args"]
-                            )
-                            
-                            # collect result content
-                            tool_result = ""
-                            for block in tool_result_content.content:
-                                if isinstance(block, TextContent):
-                                    tool_result = tool_result + block.text
-                            
-                            # add tool result to history
-                            self.messages.append({
-                                "role": "tool",
-                                "content": tool_result,
-                                "tool_name": tool_call["name"]
-                            })
-
-                        except Exception as e:
-                            self.error_console.log(f"error during tool execution of {tool_call['name']} error: {e}", style="bold red")
-                            self.messages.append({
-                                "role": "tool",
-                                "content": f"Error: {e}",
-                                "tool_name": tool_call["name"]
-                            })
+                await self.call_tools(tool_calls)                
 
             except Exception as e:
                 self.error_console.log(f"inference error: {e}", style="bold red")
                 raise ValueError("inference error")
         pass
         
-async def main():
-    homePath = Path.home()    
-
-    parser = argparse.ArgumentParser()    
-    parser.add_argument("-c", "--config", help="Absolute path to config file", default=f"{homePath}/.codingagent_config")
-    parser.add_argument("-add", "--add-mcp", help="Add mcp command")
-    parser.add_argument("-inf-url", "--inference-url", help="API URL where model is hosted")
-
-    args = parser.parse_args()
-
-    config_path = args.config
-    config = DEFAULT_CONFIG 
-
-    # read config
-    try:
-        # check if config already exists
-        os.stat(config_path)
-
-        # construct config from content
-        with open(config_path, "r") as f:
-            body = json.loads(f.read())
-            config = Config(**body)
-    except FileNotFoundError:
-        # create config file
-        with open(config_path, "w") as f:
-            f.write(json.dumps(asdict(config)))
-    except Exception as e:
-        print(f"could not check if config file exists: {e}") 
-        exit(1)
-
-    # add mcp server
-    if args.add_mcp != None:
-        config.tool_server.append(args.add_mcp)
-        with open(config_path, "w") as f:
-            f.write(json.dumps(config))
-        print(f"Added mcp: {args.add_mcp}")
-        exit(0)
-
-    # update inference url        
-    if args.inference_url != None:
-        config.inference_api_url = args.inference_url
-        with open(config_path, "w") as f:
-            f.write(json.dumps(config))
-        print(f"Updated inference url: {args.inference_url}")
-        exit(0)
-
+async def main(config: Config):
     mcp_client_index = {}
+    mcp_client_builtin = builtin_mcp_client.BuiltinMCPClient(BUILTIN_TOOLS)
     try:
-        async with AsyncExitStack() as stack:
-            for tool_server in config.tool_server:
-                client = mcp_client.MCPClient()
-                
-                # connect to server
-                await client.connect_to_server(tool_server.split(" "))
+        # add builtin tools to index
+        tools = await mcp_client_builtin.connect_to_server()
+        for tool in tools:
+            mcp_client_index[tool["function"]["name"]] = mcp_client_builtin
 
-                # register client for later use
-                mcp_client_index[tool_server] = client
+        # add async context for user defined tools
+            async with AsyncExitStack() as stack:
+                if len(config.user_mcp_servers) > 0:
+                    for server_config in config.user_mcp_servers:
+                        # construct client
+                        client = mcp_client.MCPClient()
 
-                # ensure cleanup is correct
-                stack.push_async_callback(client.__aexit__, None, None, None)
+                        # setup
+                        server_tools = await client.connect_to_server(server_config)
 
-            app = App(mcp_client_index, config) 
-            await app.init()
-            await app.run()
+                        # map each tool to its respective client
+                        for tool in server_tools:
+                            mcp_client_index[tool["function"]["name"]] = client
+
+                        # add tools to available tools list
+                        tools.extend(server_tools)
+
+                        # push exit call to stack so we can cleanup later
+                        stack.push_async_callback(client.__aexit__, None, None, None)
+
+                # construct app
+                app = App(mcp_client_index, tools, config) 
+
+                # initialise app
+                await app.init()
+
+                # run it
+                await app.run()
+
+                # for client in mcp_client_index.values():
+                #     await client.cleanup()
+
+                raise KeyboardInterrupt
     except ValueError as e:
         print("Something went wrong: ", e)
     except (KeyboardInterrupt, asyncio.CancelledError):
         print("Shutdown requested")
-        # Explicitly cancel all tasks
+    finally:
+        # explicitly cancel all tasks
         tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-    finally:
         print("Bye!")
     pass
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        homePath = Path.home()    
+
+        parser = argparse.ArgumentParser()    
+        parser.add_argument("-c", "--config", help="Absolute path to config file", default=f"{homePath}/.codingagent_config")
+        parser.add_argument("-add", "--add-mcp", help="Add mcp command", default=False, action="store_true")
+        parser.add_argument("-inf-url", "--inference-url", help="API URL where model is hosted", default="")
+        args = parser.parse_args()
+
+        # load config
+        config = load_config(config_path=args.config, args=ConfigArgs(
+            config_path=args.config,
+            mcp_command=args.add_mcp,
+            inference_url=args.inference_url,
+        ))
+
+        asyncio.run(main(config))
+    except KeyboardInterrupt:
+        pass
     except Exception as e:
-        print(f"Done {e}")
+        print("something went wrong: ", e)
+        pass

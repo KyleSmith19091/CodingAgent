@@ -4,14 +4,9 @@ import subprocess
 import json
 from typing import List, Optional
 
-from mcp.server.fastmcp import FastMCP
+from codingagent.packages.tools.tool import builtin_mcp
 
-# initialise FastMCP server
-mcp = FastMCP("ls", log_level="CRITICAL")
-
-LIMIT = 25000
-
-@mcp.tool()
+@builtin_mcp
 def ls(path: str, ignore: Optional[List[str]] = None) -> str:
     """Lists files and directories in a given path. 
     - The path parameter must be an absolute path, not a relative path. 
@@ -45,6 +40,3 @@ def ls(path: str, ignore: Optional[List[str]] = None) -> str:
         filtered.append(full_path)
 
     return json.dumps(filtered)
-
-if __name__ == "__main__":
-    mcp.run()

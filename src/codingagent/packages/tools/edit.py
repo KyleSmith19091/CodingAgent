@@ -1,19 +1,14 @@
 import fnmatch
-import logging
-import os
 from pathlib import Path
 import subprocess
 import json
 from typing import List, Optional
 
-from mcp.server.fastmcp import FastMCP
-
-# initialise FastMCP server
-mcp = FastMCP("edit", log_level="CRITICAL")
+from codingagent.packages.tools.tool import Tool, builtin_mcp
 
 LIMIT = 25000
 
-@mcp.tool()
+@builtin_mcp
 def edit_tool(path: str, ignore: Optional[List[str]] = None) -> str:
     """Performs exact string replacements in files. 
     Usage:
@@ -50,6 +45,3 @@ def edit_tool(path: str, ignore: Optional[List[str]] = None) -> str:
         filtered.append(full_path)
 
     return json.dumps(filtered)
-
-if __name__ == "__main__":
-    mcp.run()

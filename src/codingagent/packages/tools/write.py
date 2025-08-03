@@ -1,11 +1,7 @@
-from mcp.server.fastmcp import FastMCP
+from codingagent.packages.tools.tool import builtin_mcp
 
-# initialise FastMCP server
-mcp = FastMCP("write", log_level="CRITICAL")
 
-LIMIT = 10000
-
-@mcp.tool()
+@builtin_mcp
 def write_tool(file_path: str, content: str = "") -> str:
     """Writes a file to the local filesystem. 
     Usage:
@@ -20,6 +16,6 @@ def write_tool(file_path: str, content: str = "") -> str:
         f.write(content)
 
     return f"File {file_path} has been created."
+
+
         
-if __name__ == "__main__":
-    mcp.run()

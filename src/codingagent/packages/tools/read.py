@@ -1,13 +1,9 @@
-import logging
 import subprocess
 import json
 
-from mcp.server.fastmcp import FastMCP
+from codingagent.packages.tools.tool import builtin_mcp
 
-# initialise FastMCP server
-mcp = FastMCP("read", log_level="CRITICAL")
-
-@mcp.tool()
+@builtin_mcp
 def read_file(file_path: str, offset = 0, limit = 20000) -> str:
     """Reads a file from the local filesystem. You can access any file directly by using this tool.
        Assume this tool is able to read all files on the machine. If the User provides a path to a file assume that path is valid. It is okay to read a file that does not exist; an error will be returned.
@@ -52,6 +48,3 @@ def read_file(file_path: str, offset = 0, limit = 20000) -> str:
             raise ValueError(f"something went wrong: {result.stderr}")
     except Exception as e:
         return json.dumps({"error": str(e)})
-
-if __name__ == "__main__":
-    mcp.run()

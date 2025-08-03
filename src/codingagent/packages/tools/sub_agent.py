@@ -1,18 +1,7 @@
-import fnmatch
-from pathlib import Path
-import subprocess
-import json
-from typing import List, Optional
 import pkgutil
 
-from mcp.server.fastmcp import FastMCP
-
 from codingagent.packages import tools
-
-# initialise FastMCP server
-mcp = FastMCP("sub_agent", log_level="CRITICAL")
-
-LIMIT = 25000
+from codingagent.packages.tools.tool import builtin_mcp
 
 # collect supported tools
 _tools = []
@@ -20,7 +9,7 @@ for module_info in pkgutil.iter_modules(tools.__path__):
     module_name = module_info.name
     _tools.append(f"{tools.__name__}.{module_name}")
 
-@mcp.tool()
+@builtin_mcp
 def sub_agent_launch(query: str) -> str:
     f"""Launch a new agent that has access to the following tools: {" ".join(_tools)}.
     - When you are searching for a keyword or file and are not confident that you will find the right match in the first few tries, use the Agent tool to perform the search for you.
@@ -42,6 +31,4 @@ def sub_agent_launch(query: str) -> str:
     """
     return ""
 
-async def connect_to_server(self):
-    return
 

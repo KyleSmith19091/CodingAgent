@@ -2,14 +2,11 @@ import glob
 import os
 import json
 
-from mcp.server.fastmcp import FastMCP
-
-# initialise FastMCP server
-mcp = FastMCP("glob_tool", log_level="CRITICAL")
+from codingagent.packages.tools.tool import builtin_mcp
 
 LIMIT = 10000
 
-@mcp.tool()
+@builtin_mcp
 def glob_tool(root_directory: str, pattern: str = "") -> str:
     """Fast file pattern matching tool that works with any codebase size. 
     - The root directory is the directory to start the file matching from (it is recursive)
@@ -38,5 +35,3 @@ def glob_tool(root_directory: str, pattern: str = "") -> str:
 
     return json.dumps(sorted_files)
         
-if __name__ == "__main__":
-    mcp.run()

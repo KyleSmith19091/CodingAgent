@@ -1,10 +1,6 @@
 import subprocess
-import shlex
 
-from mcp.server.fastmcp import FastMCP
-
-# Initialise FastMCP server with a tool namespace "git"
-mcp = FastMCP("git", log_level="CRITICAL")
+from codingagent.packages.tools.tool import builtin_mcp
 
 # Whitelist of safe git commands (only these allowed)
 SAFE_GIT_COMMANDS = [
@@ -15,7 +11,7 @@ SAFE_GIT_COMMANDS = [
 
 LIMIT = 25000  # max output length, can be used if you want
 
-@mcp.tool()
+@builtin_mcp
 def git(command: str) -> str:
     """
     Execute a git command safely with sandbox and timeout.
@@ -54,5 +50,3 @@ def git(command: str) -> str:
     # Optionally truncate output if longer than LIMIT (not shown here)
     return output.strip()
 
-if __name__ == "__main__":
-    mcp.run()
