@@ -18,7 +18,7 @@ def builtin_tool_from_function(fn: Callable[..., Any]) -> MCPTool:
     ) 
     return MCPTool(
         name=tool.name,
-        # description=tool.description,
+        description=tool.description,
         inputSchema=tool.parameters,
         outputSchema=tool.output_schema,
         annotations=tool.annotations,
@@ -30,6 +30,8 @@ def ollama_tool_from_mcp_tool(tool: MCPTool):
         for property_id, property in tool.inputSchema["properties"].items():
             properties[property_id] = {
                 "type": "string",
+                "description": property["description"] if "description" in property else "",
+                "default": property["default"] if "default" in property else ""
             }
 
     # record tool in ollama function spec
@@ -41,11 +43,13 @@ def ollama_tool_from_mcp_tool(tool: MCPTool):
             "parameters": {
                 "type": "object",
                 "properties": properties,
-                "required": tool.inputSchema["required"] if "required" in tool.inputSchema else None
+                "required": tool.inputSchema["required"] if "required" in tool.inputSchema else []
             },
         },
     }
 
+# helper decorator so that I can define the builtin tools like MCP ones, without having to run MCP server
+# TODO: Found out there's a better way to do this. the MCP client supports .py scripts so maybe worth investigating
 def builtin_mcp(func):
     if inspect.iscoroutinefunction(func):
         @wraps(func)

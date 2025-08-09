@@ -9,11 +9,13 @@ from rich.pretty import Pretty
 from prompt_toolkit import prompt
 
 from codingagent.packages.tools import (
+    bash,
     ls,
     glob_tool,
     git,
     read,
     write,
+    edit,
 )
 
 @dataclass
@@ -35,10 +37,12 @@ BUILTIN_TOOLS: list[Callable[..., Any]] = [
     git.git,
     read.read_file,
     write.write_tool, 
+    edit.edit_tool,
+    bash.bash,
 ]
 
 DEFAULT_CONFIG = Config(
-    "http://localhost:9090",
+    "http://localhost:9090/v1",
     "hf.co/unsloth/Qwen3-8B-GGUF:Q4_K_M",
     128000,
     user_mcp_servers=[]

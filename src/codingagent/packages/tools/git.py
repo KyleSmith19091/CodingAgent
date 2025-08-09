@@ -6,7 +6,7 @@ from codingagent.packages.tools.tool import builtin_mcp
 SAFE_GIT_COMMANDS = [
     "status", "log", "diff", "show", "branch", "rev-parse", "fetch", "remote",
     "tag", "describe", "ls-files", "grep", "config --get user.name", "config --get user.email",
-    "cat-file", "rev-list", "for-each-ref", "merge-base"
+    "cat-file", "rev-list", "for-each-ref", "merge-base", "add", "push", "reset", "commit"
 ]
 
 LIMIT = 25000  # max output length, can be used if you want
@@ -14,8 +14,9 @@ LIMIT = 25000  # max output length, can be used if you want
 @builtin_mcp
 def git(command: str) -> str:
     """
-    Execute a git command safely with sandbox and timeout.
-    Only allows commands in SAFE_GIT_COMMANDS whitelist (after stripping 'git ' prefix).
+    Use to execute a git command.
+    - ALWAYS ask for permission before running 'add' or 'push'
+    - Only allows commands in SAFE_GIT_COMMANDS whitelist (after stripping 'git ' prefix).
     
     Parameters:
     - command: The git command string **without** the initial 'git', e.g. "status" or "log -1"

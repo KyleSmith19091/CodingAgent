@@ -1,3 +1,5 @@
+import os
+
 from codingagent.packages.tools.tool import builtin_mcp
 
 
@@ -11,6 +13,9 @@ def write_tool(file_path: str, content: str = "") -> str:
     - NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
     - Only use emojis if the user explicitly requests it. Avoid writing emojis to files unless asked.
     """
+
+    if os.path.isfile(file_path):
+        raise ValueError(f"File already exists, use 'edit_tool' to edit the content of existing files.")
 
     with open(file_path, "w") as f:
         f.write(content)

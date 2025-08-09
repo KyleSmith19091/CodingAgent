@@ -1,22 +1,31 @@
-import fnmatch
-from pathlib import Path
-import subprocess
 import json
-from typing import List, Optional
+from pathlib import Path
+from typing import List, Tuple, Union
 
-from codingagent.packages.tools.tool import Tool, builtin_mcp
+from codingagent.packages.tools.tool import builtin_mcp
 
 LIMIT = 25000
 
 @builtin_mcp
-def edit_tool(path: str, ignore: Optional[List[str]] = None) -> str:
-    """Performs exact string replacements in files. 
+def edit_tool(path: str, file_content: str, old_string: str, new_string: str, replace_all: bool = False) -> str:
+    """
+    When to use:
+        - When you need to perform exact string replacements in files. 
+        - When you need to update part of the content of a file.
+        - When need to append to an existing file.
+
+    Parameters:
+        path: Path to the file to edit.
+        file_content: Current file content (from read_file output).
+        old_string: String to replace (must exclude line number prefixes).
+        new_string: Replacement string (must preserve indentation after prefix).
+        replace_all: If True, replace every occurrence of old_string.
+
     Usage:
-    - You must use your read_file tool at least once in the conversation before editing. This tool will error if you attempt
-      an edit without reading the file.
-    - When editing text from Read tool output, ensure you preserve the exact indentation (tabs/spaces) as it appears AFTER the line number prefix. The line number prefix format is: spaces + line number + tab. Everything after that tab is the actual file content to match. Never include any part of the line number prefix in the old_string or new_string.
-    - ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.
-    - Only use emojis if the user explicitly requests it. Avoid adding emojis to files unless asked.
+        - IMPORTANT when editing text from read_file output, ensure you preserve the exact indentation (tabs/spaces) as it appears AFTER the line number prefix. The line number prefix format is: spaces + line number + tab. Everything after that tab is the actual file content to match. Never include any part of the line number prefix in the old_string or new_string. 
+        - ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.
+        - The edit will FAIL if old_string is not unique in the file. Either provide a larger string with more surrounding context to make it unique or use replace_all to change every instance of old_string. 
+        - Use replace_all for replacing and renaming strings across the file. This parameter is useful if you want to rename a variable for instance.
     """
 
     p = Path(path)
@@ -25,23 +34,22 @@ def edit_tool(path: str, ignore: Optional[List[str]] = None) -> str:
     if not p.exists():
         raise FileNotFoundError(f"Path does not exist: {path}")
 
-    # Run `ls -A` (includes hidden files, excludes . and ..)
-    result = subprocess.run(
-        ["ls", "-A", str(p)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=True
-    )
+    count = file_content.count(old_string)
 
-    files = result.stdout.strip().split("\n") if result.stdout else []
-    ignore = ignore or []
+    if replace_all:
+        if count == 0:
+            raise ValueError(f"String '{old_string}' not found in provided file content.")
+        updated_content = file_content.replace(old_string, new_string)
+    else:
+        if count == 0:
+            raise ValueError(f"String '{old_string}' not found in provided file content.")
+        if count > 1:
+            raise ValueError(
+                f"String '{old_string}' found {count} times, must be unique or set replace_all=True."
+            )
+        updated_content = file_content.replace(old_string, new_string, 1)
 
-    filtered = []
-    for f in files:
-        full_path = str(p / f)
-        if any(fnmatch(full_path, pattern) for pattern in ignore):
-            continue
-        filtered.append(full_path)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(updated_content)
 
-    return json.dumps(filtered)
+    return json.dumps({"output": "done"})

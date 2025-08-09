@@ -20,6 +20,8 @@ class BuiltinMCPClient:
         # get a handle to the tool
         command = self.command_index[tool_name]
 
+        # print(command)
+
         # check if we need to await the execution of the command
         if inspect.iscoroutinefunction(command):
             return await command(**tool_args)
