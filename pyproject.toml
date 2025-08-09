@@ -7,12 +7,15 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.116.1",
     "fastmcp>=2.11.0",
+    "huggingface-hub>=0.34.3",
     "llama-cpp-python>=0.3.14",
     "ollama>=0.5.1",
+    "openai>=1.98.0",
     "prompt-toolkit>=3.0.51",
     "requests>=2.32.4",
     "rich>=14.0.0",
     "textual>=4.0.0",
+    "tiktoken>=0.11.0",
 ]
 
 [project.scripts]
