@@ -1,0 +1,29 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    id: build-image
+    args:
+      - build
+      - -t
+      - europe-west4-docker.pkg.dev/meshtrade-development/build-artifacts/model-qwen3:latest
+      - .
+    env:
+      - DOCKER_BUILDKIT=1
+      - DOCKER_CLIENT_TIMEOUT=300
+      - COMPOSE_HTTP_TIMEOUT=300
+
+  - name: gcr.io/cloud-builders/docker
+    id: push-image
+    args:
+      - push
+      - europe-west4-docker.pkg.dev/meshtrade-development/build-artifacts/model-qwen3:latest
+
+# Define the images to be pushed
+images:
+  - europe-west4-docker.pkg.dev/meshtrade-development/build-artifacts/model-qwen3:latest
+
+# Increase timeout to handle large model downloads (default is 10m)
+timeout: 7200s
+
+# Use a high-CPU machine type to avoid resource constraints
+options:
+  machineType: E2_HIGHCPU_32
