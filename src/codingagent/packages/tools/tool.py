@@ -29,7 +29,7 @@ def ollama_tool_from_mcp_tool(tool: MCPTool):
     if "properties" in tool.inputSchema:
         for property_id, property in tool.inputSchema["properties"].items():
             properties[property_id] = {
-                "type": "string",
+                "type": property["type"] if "type" in property else "string",
                 "description": property["description"] if "description" in property else "",
                 "default": property["default"] if "default" in property else ""
             }

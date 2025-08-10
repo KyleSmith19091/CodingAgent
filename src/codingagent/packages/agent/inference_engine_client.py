@@ -50,9 +50,7 @@ class InferenceEngineClient:
                         status.start()
                         thinking = False 
 
-                    # only add non-thinking assistant output to context 
-                    # if not thinking and content != None:
-                    #     response.append(content)
+                    # add thinking to context
                     if content != None:
                         response.append(content)
                         
@@ -102,17 +100,13 @@ class InferenceEngineClient:
                     # so there's no real point in continuing 
                     raise ValueError("got unexpected tool call chunk for a tool call with no start")
 
-            # messages.append({
-            #     "role": "assistant",
-            #     "content": ",".join([f"calling: {tool_call["name"]} with args: {tool_call["args"]}" for tool_call in tool_index])
-            # })
-
             messages = await self.call_tools(messages, tool_index, tool_callback)
 
             messages.append({
-                "role": "user",
-                "content": "Interpret the result of the tool calls"
+                "role": "assistant",
+                "content": "Interpret the result of the tool calls, IMPORTANT: I should be proactive with calling tools if I think there's still work left. If I think I should call more tools, I should call them immediately."
             })
+            # enable thinking for tool call results
             should_think = True
 
     async def call_tools(self, messages, tool_calls: list[dict], tool_callback: Callable):

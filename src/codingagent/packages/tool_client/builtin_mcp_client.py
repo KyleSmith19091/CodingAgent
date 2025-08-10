@@ -1,3 +1,4 @@
+import json
 from typing import Any, Callable, List
 import inspect
 from mcp import Tool
@@ -20,7 +21,11 @@ class BuiltinMCPClient:
         # get a handle to the tool
         command = self.command_index[tool_name]
 
-        # print(command)
+        # validate args
+        try:
+            json.dumps(tool_args) 
+        except Exception as e:
+            raise ValueError("tool arguments invalid JSON: ", e)
 
         # check if we need to await the execution of the command
         if inspect.iscoroutinefunction(command):

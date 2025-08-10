@@ -14,6 +14,7 @@ from codingagent.packages.tools import (
     glob_tool,
     git,
     read,
+    todo,
     write,
     edit,
 )
@@ -21,8 +22,6 @@ from codingagent.packages.tools import (
 @dataclass
 class Config:
     inference_api_url: str
-    model_id: str
-    context_size: int
     user_mcp_servers: list[dict]
 
 @dataclass
@@ -39,12 +38,13 @@ BUILTIN_TOOLS: list[Callable[..., Any]] = [
     write.write_tool, 
     edit.edit_tool,
     bash.bash,
+    # todo.todo_create,
+    # todo.todo_update,
+    # todo.todo_read,
 ]
 
 DEFAULT_CONFIG = Config(
     "http://localhost:9090/v1",
-    "hf.co/unsloth/Qwen3-8B-GGUF:Q4_K_M",
-    128000,
     user_mcp_servers=[]
 )
 
